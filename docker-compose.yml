@@ -1,0 +1,30 @@
+services:
+  mashup_bot:
+    image: jentcold/mashup_search_bot:latest
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=bot_token_here
+      - DB_USER=bot_user
+      - DB_PASSWORD=secure_password_here
+      - DB_NAME=mashups
+      - DB_HOST=mashups_postgres
+      - OWNER_DISCORD_IDS=ID1 ,ID2
+      - MASHUP_CHANNEL_IDS=ID1 ,ID2
+    depends_on:
+      - mashups_postgres
+
+  mashups_postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=bot_user
+      - POSTGRES_PASSWORD=secure_password_here
+      - POSTGRES_DB=mashups
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  postgres_data:
