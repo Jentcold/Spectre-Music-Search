@@ -1,3 +1,7 @@
+---
+theme: jekyll-theme-merlot
+---
+
 # Terms of Service for Spectre Music Search Bot
 
 **Effective Date:** June 19, 2026
