@@ -403,7 +403,7 @@ class MediaCog(commands.Cog):
                             SELECT asset_type, url, title, uploader, date_shared, original_message_url
                             FROM tracked_media
                             ORDER BY date_shared DESC
-                            LIMIT 50;
+                            LIMIT 30;
                         """ 
             rows = await conn.fetch(sql_query)
 
