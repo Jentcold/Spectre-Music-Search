@@ -3,7 +3,7 @@ import asyncio
 import datetime
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from config import TARGET_CHANNEL_IDS
 from checks import is_owner
@@ -143,6 +143,78 @@ class SearchPagination(discord.ui.View):
 class MediaCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._sync_running = False
+        self.background_sync.add_exception_type(Exception)
+        self.background_sync.start()
+
+    async def cog_unload(self):
+        self.background_sync.cancel()
+
+    async def _message_already_indexed(self, conn, jump_url: str) -> bool:
+        existing = await conn.fetchval(
+            "SELECT 1 FROM tracked_media WHERE original_message_url = $1 LIMIT 1;",
+            jump_url
+        )
+        return existing is not None
+
+    async def run_background_sync(self) -> tuple[int, int]:
+        synced_count = 0
+        total_scanned = 0
+
+        for channel_id in TARGET_CHANNEL_IDS:
+            target_channel = self.bot.get_channel(channel_id)
+            if not target_channel:
+                continue
+
+            print(f"[BgSync] Now pulling historic entries from: #{target_channel.name}")
+
+            async for message in target_channel.history(limit=None, oldest_first=False):
+                total_scanned += 1
+                if total_scanned % 100 == 0:
+                    print(f"[BgSync] Evaluated {total_scanned} context frames... Inserted {synced_count} entries.")
+
+                if message.author.bot:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                async with self.bot.db_pool.acquire() as conn:
+                    already = await self._message_already_indexed(conn, message.jump_url)
+
+                if already:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                was_logged_count = await self.process_and_save_message(message)
+                synced_count += was_logged_count
+
+                await asyncio.sleep(0.1)
+
+        return synced_count, total_scanned
+
+    @tasks.loop(hours=1)
+    async def background_sync(self):
+        if self._sync_running:
+            print("[BgSync] Previous hourly sync still in progress; skipping this tick.")
+            return
+        if not self.bot.is_ready() or self.bot.db_pool is None:
+            print("[BgSync] Bot not ready / DB pool unavailable; skipping this tick.")
+            return
+        if not TARGET_CHANNEL_IDS:
+            return
+
+        self._sync_running = True
+        try:
+            print("[BgSync] Hourly background sync starting...")
+            synced_count, total_scanned = await self.run_background_sync()
+            print(f"[BgSync] Complete. Scanned {total_scanned} messages, inserted/updated {synced_count} entries.")
+        except Exception as e:
+            print(f"[BgSync] Error during background sync: {e}")
+        finally:
+            self._sync_running = False
+
+    @background_sync.before_loop
+    async def _wait_for_ready(self):
+        await self.bot.wait_until_ready()
 
     async def process_and_save_message(self, message: discord.Message) -> int:
         from stream_meta import fetch_stream_title
@@ -225,23 +297,7 @@ class MediaCog(commands.Cog):
 
         await interaction.followup.send(f"Commencing Database Sync...")
 
-        synced_count = 0
-        total_scanned = 0
-
-        for channel_id in TARGET_CHANNEL_IDS:
-            target_channel = self.bot.get_channel(channel_id)
-            if not target_channel:
-                continue
-
-            print(f"[Sync Loop] Now pulling historic entries from: #{target_channel.name}")
-
-            async for message in target_channel.history(limit=None, oldest_first=False):
-                total_scanned += 1
-                if total_scanned % 100 == 0:
-                    print(f"[Sync Sweep] Evaluated {total_scanned} context frames... Inserted {synced_count} entries.")
-
-                was_logged_count = await self.process_and_save_message(message)
-                synced_count += was_logged_count
+        synced_count, total_scanned = await self.run_background_sync()
 
         await interaction.followup.send(f"✅ Database Sync Complete! Scanned {total_scanned} messages and updated **{synced_count}** entries.")
 
