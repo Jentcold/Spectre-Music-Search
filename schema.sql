@@ -9,8 +9,9 @@ CREATE TABLE IF NOT EXISTS tracked_media (
     title TEXT NOT NULL,
     uploader VARCHAR(255) NOT NULL,
     date_shared DATE NOT NULL,
-    original_message_url TEXT UNIQUE NOT NULL,
-    channel_id BIGINT NOT NULL
+    original_message_url TEXT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    UNIQUE (original_message_url, url)
 );
 
 -- 3. Composite GIN index on lower(title) for both fuzzy similarity AND substring (ILIKE) matching

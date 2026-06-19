@@ -184,11 +184,25 @@ class MediaCog(commands.Cog):
     async def cog_unload(self):
         self.background_sync.cancel()
 
-    async def _message_already_indexed(self, conn, jump_url: str) -> bool:
-        existing = await conn.fetchval(
-            "SELECT 1 FROM tracked_media WHERE original_message_url = $1 LIMIT 1;", jump_url
+    async def _count_indexed_for_message(self, conn, jump_url: str) -> int:
+        return await conn.fetchval(
+            "SELECT COUNT(*) FROM tracked_media WHERE original_message_url = $1;", jump_url
         )
-        return existing is not None
+
+    @staticmethod
+    def _extract_assets(message: discord.Message) -> list:
+        stream_links = STREAM_RE.findall(message.content)
+        yt_links = YOUTUBE_RE.findall(message.content)
+        assets = []
+        for link in stream_links:
+            assets.append(("STREAM", link))
+        for link in yt_links:
+            assets.append(("YOUTUBE", link))
+        for attachment in message.attachments:
+            fname = attachment.filename
+            if fname and any(fname.lower().endswith(ext) for ext in VALID_AUDIO_EXTENSIONS):
+                assets.append(("FILE", attachment.url, fname))
+        return assets
 
     async def run_background_sync(self) -> tuple[int, int]:
         synced_count = 0
@@ -213,13 +227,15 @@ class MediaCog(commands.Cog):
                     continue
 
                 async with self.bot.db_pool.acquire() as conn:
-                    already = await self._message_already_indexed(conn, message.jump_url)
+                    already = await self._count_indexed_for_message(conn, message.jump_url)
 
-                if already:
+                candidate_assets = self._extract_assets(message)
+
+                if already >= len(candidate_assets) > 0:
                     await asyncio.sleep(0.05)
                     continue
 
-                was_logged_count = await self.process_and_save_message(message)
+                was_logged_count = await self.process_and_save_message(message, candidate_assets)
                 synced_count += was_logged_count
 
                 await asyncio.sleep(0.1)
@@ -253,26 +269,17 @@ class MediaCog(commands.Cog):
     async def _wait_for_ready(self):
         await self.bot.wait_until_ready()
 
-    async def process_and_save_message(self, message: discord.Message) -> int:
+    async def process_and_save_message(
+        self, message: discord.Message, assets_to_log: list | None = None
+    ) -> int:
         from stream_meta import fetch_stream_title
         from youtube_meta import fetch_youtube_title
 
         if message.author.bot:
             return 0
 
-        stream_links = STREAM_RE.findall(message.content)
-        yt_links = YOUTUBE_RE.findall(message.content)
-        assets_to_log = []
-
-        for link in stream_links:
-            assets_to_log.append(("STREAM", link))
-        for link in yt_links:
-            assets_to_log.append(("YOUTUBE", link))
-
-        for attachment in message.attachments:
-            fname = attachment.filename
-            if fname and any(fname.lower().endswith(ext) for ext in VALID_AUDIO_EXTENSIONS):
-                assets_to_log.append(("FILE", attachment.url, fname))
+        if assets_to_log is None:
+            assets_to_log = self._extract_assets(message)
 
         if not assets_to_log:
             return 0
@@ -309,7 +316,7 @@ class MediaCog(commands.Cog):
                         """
                         INSERT INTO tracked_media (asset_type, url, title, uploader, date_shared, original_message_url, channel_id)
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (original_message_url) DO NOTHING;
+                        ON CONFLICT (original_message_url, url) DO NOTHING;
                         """,
                         label,
                         url,
