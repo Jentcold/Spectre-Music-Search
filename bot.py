@@ -1,11 +1,12 @@
 import asyncio
-import discord
+
 import asyncpg
+import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import TOKEN, DATABASE_URL, TARGET_CHANNEL_IDS
 from checks import is_owner
+from config import DATABASE_URL, TARGET_CHANNEL_IDS, TOKEN
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -25,7 +26,9 @@ class MusicLedgerBot(commands.Bot):
                 print("[Database] Successfully connected to PostgreSQL database pool!")
                 break
             except (ConnectionRefusedError, asyncpg.exceptions.CannotConnectNowError):
-                print("[Database] PostgreSQL is initializing system components... Retrying in 2 seconds...")
+                print(
+                    "[Database] PostgreSQL is initializing system components... Retrying in 2 seconds..."
+                )
                 await asyncio.sleep(2)
             except Exception as e:
                 print(f"[Database] Unexpected container runtime intersection: {e}")
@@ -35,16 +38,21 @@ class MusicLedgerBot(commands.Bot):
         await self.load_extension("cogs.media")
         await self.tree.sync()
 
+
 bot = MusicLedgerBot()
 
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}.")
-    print(f"[Initialization] Successfully targeted {len(TARGET_CHANNEL_IDS)} source channels: {TARGET_CHANNEL_IDS}")
+    print(
+        f"[Initialization] Successfully targeted {len(TARGET_CHANNEL_IDS)} source channels: {TARGET_CHANNEL_IDS}"
+    )
 
 
-@bot.tree.command(name="reload", description="Reload the media commands cog without restarting the bot")
+@bot.tree.command(
+    name="reload", description="Reload the media commands cog without restarting the bot"
+)
 @is_owner()
 async def reload_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -57,9 +65,13 @@ async def reload_command(interaction: discord.Interaction):
 
 
 @reload_command.error
-async def reload_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+async def reload_command_error(
+    interaction: discord.Interaction, error: app_commands.AppCommandError
+):
     if isinstance(error, app_commands.errors.CheckFailure):
-        await interaction.response.send_message("❌ You are not authorized to use this command.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ You are not authorized to use this command.", ephemeral=True
+        )
 
 
 if __name__ == "__main__":

@@ -3,13 +3,15 @@ Small helper to fetch a YouTube video's title via the public oEmbed endpoint.
 No API key required. Used so search results show the real video title.
 """
 
-import aiohttp
 import re
+
+import aiohttp
 
 OEMBED_URL = "https://www.youtube.com/oembed"
 
-# Regex to isolate just the pure clean youtube link 
+# Regex to isolate just the pure clean youtube link
 YT_ID_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([\w\-]+)", re.IGNORECASE)
+
 
 async def fetch_youtube_title(video_url: str, timeout_seconds: float = 5.0) -> str | None:
     """
@@ -19,7 +21,7 @@ async def fetch_youtube_title(video_url: str, timeout_seconds: float = 5.0) -> s
     match = YT_ID_RE.search(video_url)
     if not match:
         return None
-        
+
     # Rebuild a clean URL for the API request (removes &t=, &list=, etc.)
     clean_url = f"https://www.youtube.com/watch?v={match.group(1)}"
 

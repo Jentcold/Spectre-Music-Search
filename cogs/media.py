@@ -1,21 +1,28 @@
-import re
 import asyncio
 import datetime
+import re
+
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import TARGET_CHANNEL_IDS
 from checks import is_owner
+from config import TARGET_CHANNEL_IDS
 
-STREAM_RE = re.compile(r"(https?://(?:www\.)?untitled\.stream/library/project/[a-zA-Z0-9_]+)", re.IGNORECASE)
-YOUTUBE_RE = re.compile(r"(https?://(?:www\.)?(?:youtube\.com/[^\s>)]+|youtu\.be/[^\s>)]+|youtube\.com/shorts/[a-zA-Z0-9_\-]+))", re.IGNORECASE)
+STREAM_RE = re.compile(
+    r"(https?://(?:www\.)?untitled\.stream/library/project/[a-zA-Z0-9_]+)", re.IGNORECASE
+)
+YOUTUBE_RE = re.compile(
+    r"(https?://(?:www\.)?(?:youtube\.com/[^\s>)]+|youtu\.be/[^\s>)]+|youtube\.com/shorts/[a-zA-Z0-9_\-]+))",
+    re.IGNORECASE,
+)
 
-VALID_AUDIO_EXTENSIONS = ('.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.aiff')
+VALID_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".aiff")
 
 
 def clean_filename(filename: str, author_fallback: str = "Unknown") -> str:
     from pathlib import Path
+
     if not filename or not isinstance(filename, str):
         return f"{author_fallback}'s Audio Track"
     name = Path(filename).stem
@@ -47,22 +54,47 @@ class SearchPagination(discord.ui.View):
         self.prev_page.disabled = self.current_page == 0
         self.next_page.disabled = self.current_page >= self.total_pages - 1
 
-        self.filter_all.style = discord.ButtonStyle.success if self.current_filter == "ALL" else discord.ButtonStyle.secondary
-        self.filter_stream.style = discord.ButtonStyle.success if self.current_filter == "STREAM" else discord.ButtonStyle.secondary
-        self.filter_youtube.style = discord.ButtonStyle.success if self.current_filter == "YOUTUBE" else discord.ButtonStyle.secondary
-        self.filter_file.style = discord.ButtonStyle.success if self.current_filter == "FILE" else discord.ButtonStyle.secondary
+        self.filter_all.style = (
+            discord.ButtonStyle.success
+            if self.current_filter == "ALL"
+            else discord.ButtonStyle.secondary
+        )
+        self.filter_stream.style = (
+            discord.ButtonStyle.success
+            if self.current_filter == "STREAM"
+            else discord.ButtonStyle.secondary
+        )
+        self.filter_youtube.style = (
+            discord.ButtonStyle.success
+            if self.current_filter == "YOUTUBE"
+            else discord.ButtonStyle.secondary
+        )
+        self.filter_file.style = (
+            discord.ButtonStyle.success
+            if self.current_filter == "FILE"
+            else discord.ButtonStyle.secondary
+        )
 
     def get_current_page_embed(self) -> discord.Embed:
-        filter_labels = {"ALL": "Everything", "STREAM": "Untitled.stream", "YOUTUBE": "YouTube Links", "FILE": "Audio Files"}
+        filter_labels = {
+            "ALL": "Everything",
+            "STREAM": "Untitled.stream",
+            "YOUTUBE": "YouTube Links",
+            "FILE": "Audio Files",
+        }
 
         embed = discord.Embed(
             title=f"🔎 Unified Media Search: '{self.keyword}'",
             description=f"Showing: **{filter_labels[self.current_filter]}**\nPage {self.current_page + 1} of {self.total_pages} ({len(self.filtered_results)} filtered matches)",
-            color=discord.Color.blurple()
+            color=discord.Color.blurple(),
         )
 
         if not self.filtered_results:
-            embed.add_field(name="No Matches Found", value=f"No entries matched the query '{self.keyword}' here.", inline=False)
+            embed.add_field(
+                name="No Matches Found",
+                value=f"No entries matched the query '{self.keyword}' here.",
+                inline=False,
+            )
             return embed
 
         start_idx = self.current_page * self.per_page
@@ -70,29 +102,29 @@ class SearchPagination(discord.ui.View):
         page_items = self.filtered_results[start_idx:end_idx]
 
         for index, data in enumerate(page_items, start=start_idx + 1):
-            if data['asset_type'] == "STREAM":
+            if data["asset_type"] == "STREAM":
                 type_label = "📀 `[UNTITLED.STREAM]`"
-            elif data['asset_type'] == "YOUTUBE":
+            elif data["asset_type"] == "YOUTUBE":
                 type_label = "📺 `[YOUTUBE]`"
             else:
                 type_label = "🎵 `[AUDIO FILE]`"
 
-            date_val = data['date_shared'].strftime("%Y-%m-%d") if isinstance(data['date_shared'], (datetime.date, datetime.datetime)) else data['date_shared']
+            date_val = (
+                data["date_shared"].strftime("%Y-%m-%d")
+                if isinstance(data["date_shared"], (datetime.date, datetime.datetime))
+                else data["date_shared"]
+            )
 
             value_details = (
                 f"👤 **Shared by:** {data['uploader']}  •  📅 {date_val}\n"
                 f"🏷️ **Type:** {type_label}\n"
             )
-            if data['url'] != "N/A":
+            if data["url"] != "N/A":
                 value_details += f"🔗 **Source Link:** [Listen Here]({data['url']})\n"
-            if data['original_message_url']:
+            if data["original_message_url"]:
                 value_details += f"➡️ [Jump to Context Message]({data['original_message_url']})"
             # Empty-named field whose value is a divider rule between results
-            embed.add_field(
-                    name="​",
-                    value="─── ─── ─── ─── ─── ─── ─── ─── ───",
-                    inline=False
-                )
+            embed.add_field(name="​", value="─── ─── ─── ─── ─── ─── ─── ─── ───", inline=False)
 
             embed.add_field(name=f"{index}. {data['title']}", value=value_details, inline=False)
         return embed
@@ -104,7 +136,9 @@ class SearchPagination(discord.ui.View):
         if filter_type == "ALL":
             self.filtered_results = self.all_results
         else:
-            self.filtered_results = [item for item in self.all_results if item['asset_type'] == filter_type]
+            self.filtered_results = [
+                item for item in self.all_results if item["asset_type"] == filter_type
+            ]
 
         self.update_button_states()
         await interaction.response.edit_message(embed=self.get_current_page_embed(), view=self)
@@ -152,8 +186,7 @@ class MediaCog(commands.Cog):
 
     async def _message_already_indexed(self, conn, jump_url: str) -> bool:
         existing = await conn.fetchval(
-            "SELECT 1 FROM tracked_media WHERE original_message_url = $1 LIMIT 1;",
-            jump_url
+            "SELECT 1 FROM tracked_media WHERE original_message_url = $1 LIMIT 1;", jump_url
         )
         return existing is not None
 
@@ -171,7 +204,9 @@ class MediaCog(commands.Cog):
             async for message in target_channel.history(limit=None, oldest_first=False):
                 total_scanned += 1
                 if total_scanned % 100 == 0:
-                    print(f"[BgSync] Evaluated {total_scanned} context frames... Inserted {synced_count} entries.")
+                    print(
+                        f"[BgSync] Evaluated {total_scanned} context frames... Inserted {synced_count} entries."
+                    )
 
                 if message.author.bot:
                     await asyncio.sleep(0.05)
@@ -206,7 +241,9 @@ class MediaCog(commands.Cog):
         try:
             print("[BgSync] Hourly background sync starting...")
             synced_count, total_scanned = await self.run_background_sync()
-            print(f"[BgSync] Complete. Scanned {total_scanned} messages, inserted/updated {synced_count} entries.")
+            print(
+                f"[BgSync] Complete. Scanned {total_scanned} messages, inserted/updated {synced_count} entries."
+            )
         except Exception as e:
             print(f"[BgSync] Error during background sync: {e}")
         finally:
@@ -250,7 +287,9 @@ class MediaCog(commands.Cog):
 
             if label == "STREAM":
                 fetched_title = await fetch_stream_title(url)
-                title = fetched_title if fetched_title else "Removed / Private untitled.stream Album"
+                title = (
+                    fetched_title if fetched_title else "Removed / Private untitled.stream Album"
+                )
                 await asyncio.sleep(0.5)
             elif label == "YOUTUBE":
                 fetched_title = await fetch_youtube_title(url)
@@ -272,7 +311,13 @@ class MediaCog(commands.Cog):
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
                         ON CONFLICT (original_message_url) DO NOTHING;
                         """,
-                        label, url, title, message.author.display_name, date_obj, message.jump_url, message.channel.id
+                        label,
+                        url,
+                        title,
+                        message.author.display_name,
+                        date_obj,
+                        message.jump_url,
+                        message.channel.id,
                     )
                     items_saved += 1
                 except Exception as e:
@@ -286,7 +331,9 @@ class MediaCog(commands.Cog):
             return
         await self.process_and_save_message(message)
 
-    @app_commands.command(name="sync", description="Scan ALL historical messages and backfill database ledger values")
+    @app_commands.command(
+        name="sync", description="Scan ALL historical messages and backfill database ledger values"
+    )
     @is_owner()
     async def sync_command(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -295,18 +342,26 @@ class MediaCog(commands.Cog):
             await interaction.followup.send("Channel setup configuration is missing or invalid.")
             return
 
-        await interaction.followup.send(f"Commencing Database Sync...")
+        await interaction.followup.send("Commencing Database Sync...")
 
         synced_count, total_scanned = await self.run_background_sync()
 
-        await interaction.followup.send(f"✅ Database Sync Complete! Scanned {total_scanned} messages and updated **{synced_count}** entries.")
+        await interaction.followup.send(
+            f"✅ Database Sync Complete! Scanned {total_scanned} messages and updated **{synced_count}** entries."
+        )
 
     @sync_command.error
-    async def sync_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+    async def sync_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
         if isinstance(error, app_commands.errors.CheckFailure):
-            await interaction.response.send_message("❌ You are not authorized to use this command.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ You are not authorized to use this command.", ephemeral=True
+            )
 
-    @app_commands.command(name="search", description="Search all indexed assets simultaneously out of PostgreSQL")
+    @app_commands.command(
+        name="search", description="Search all indexed assets simultaneously out of PostgreSQL"
+    )
     async def search_command(self, interaction: discord.Interaction, keyword: str):
         await interaction.response.defer()
 
@@ -328,7 +383,9 @@ class MediaCog(commands.Cog):
             rows = await conn.fetch(sql_query, keyword)
 
         if not rows:
-            await interaction.followup.send(f"❌ No matching tracks found across the database for '{keyword}'.")
+            await interaction.followup.send(
+                f"❌ No matching tracks found across the database for '{keyword}'."
+            )
             return
 
         cleaned_results = [dict(row) for row in rows]
