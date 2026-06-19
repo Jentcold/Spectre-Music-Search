@@ -325,12 +325,6 @@ class MediaCog(commands.Cog):
 
         return items_saved
 
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.channel.id not in TARGET_CHANNEL_IDS:
-            return
-        await self.process_and_save_message(message)
-
     @app_commands.command(
         name="sync", description="Scan ALL historical messages and backfill database ledger values"
     )
