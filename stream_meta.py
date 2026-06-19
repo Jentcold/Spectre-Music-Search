@@ -2,8 +2,10 @@
 Advanced scraper helper to pull project titles from untitled.stream links.
 """
 
-import aiohttp
 import re
+
+import aiohttp
+
 
 async def fetch_stream_title(project_url: str, timeout_seconds: float = 8.0) -> str | None:
     """
@@ -22,23 +24,27 @@ async def fetch_stream_title(project_url: str, timeout_seconds: float = 8.0) -> 
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
         "Sec-Fetch-User": "?1",
-        "Cache-Control": "max-age=0"
+        "Cache-Control": "max-age=0",
     }
-    
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(project_url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout_seconds)) as resp:
+            async with session.get(
+                project_url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+            ) as resp:
                 if resp.status != 200:
-                    print(f"[Scraper Warning] Received status code {resp.status} for URL: {project_url}")
+                    print(
+                        f"[Scraper Warning] Received status code {resp.status} for URL: {project_url}"
+                    )
                     return None
-                
+
                 html_content = await resp.text()
 
                 # 1: Check OpenGraph title attribute (Most reliable for rich embeds)
                 og_title_match = re.search(
-                    r'<meta\s+property=["\']og:title["\']\s+content=["\'](.*?)["\']', 
-                    html_content, 
-                    re.IGNORECASE
+                    r'<meta\s+property=["\']og:title["\']\s+content=["\'](.*?)["\']',
+                    html_content,
+                    re.IGNORECASE,
                 )
                 if og_title_match:
                     title = og_title_match.group(1).strip()
@@ -47,9 +53,9 @@ async def fetch_stream_title(project_url: str, timeout_seconds: float = 8.0) -> 
 
                 # 2: Check Twitter title attribute
                 twitter_title_match = re.search(
-                    r'<meta\s+name=["\']twitter:title["\']\s+content=["\'](.*?)["\']', 
-                    html_content, 
-                    re.IGNORECASE
+                    r'<meta\s+name=["\']twitter:title["\']\s+content=["\'](.*?)["\']',
+                    html_content,
+                    re.IGNORECASE,
                 )
                 if twitter_title_match:
                     title = twitter_title_match.group(1).strip()
@@ -57,15 +63,17 @@ async def fetch_stream_title(project_url: str, timeout_seconds: float = 8.0) -> 
                         return title
 
                 # 3: Standard document title fallback
-                meta_title = re.search(r'<title[^>]*>(.*?)</title>', html_content, re.IGNORECASE)
+                meta_title = re.search(r"<title[^>]*>(.*?)</title>", html_content, re.IGNORECASE)
                 if meta_title:
                     raw_title = meta_title.group(1).strip()
                     # Strip generic branding suffix if applicable
-                    cleaned_title = re.sub(r'\s*\|\s*\[?untitled\]\??', '', raw_title, flags=re.IGNORECASE).strip()
+                    cleaned_title = re.sub(
+                        r"\s*\|\s*\[?untitled\]\??", "", raw_title, flags=re.IGNORECASE
+                    ).strip()
                     if cleaned_title and cleaned_title.lower() != "untitled":
                         return cleaned_title
 
     except Exception as e:
         print(f"[Scraper Error] Failed parsing untitled.stream meta tracking details: {e}")
-        
+
     return None

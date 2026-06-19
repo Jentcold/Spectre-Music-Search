@@ -1,8 +1,16 @@
-FROM python:3.11-slim
+FROM python:3.14-alpine
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+ARG DISCORD_TOKEN
+ARG DATABASE_URL
+ARG OWNER_DISCORD_IDS
+ARG MASHUP_CHANNEL_IDS
+
+ENV DISCORD_TOKEN=$DISCORD_TOKEN \
+    DATABASE_URL=$DATABASE_URL \
+    OWNER_DISCORD_IDS=$OWNER_DISCORD_IDS \
+    MASHUP_CHANNEL_IDS=$MASHUP_CHANNEL_IDS
+
+RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /app
 
