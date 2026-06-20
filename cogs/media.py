@@ -10,7 +10,7 @@ from checks import is_owner
 from config import TARGET_CHANNEL_IDS
 
 STREAM_RE = re.compile(
-    r"(https?://(?:www\.)?untitled\.stream/library/project/[a-zA-Z0-9_]+)", re.IGNORECASE
+    r"(https?://(?:www\.)?untitled\.stream/library/project/[a-zA-Z0-9_-]+)", re.IGNORECASE
 )
 YOUTUBE_RE = re.compile(
     r"(https?://(?:www\.)?(?:youtube\.com/[^\s>)]+|youtu\.be/[^\s>)]+|youtube\.com/shorts/[a-zA-Z0-9_\-]+))",
