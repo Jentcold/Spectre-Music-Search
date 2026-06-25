@@ -443,7 +443,7 @@ class MediaCog(commands.Cog):
         await interaction.followup.send(embed=view.get_current_page_embed(), view=view)
     
     @app_commands.command(name="latest", description="Shows the latest mashup")
-    async def latest_command(self, interaction:discord.interactions):
+    async def latest_command(self, interaction: discord.Interaction):
         await interaction.response.defer()
         
         async with self.bot.db_pool.acquire() as conn:
@@ -457,7 +457,7 @@ class MediaCog(commands.Cog):
 
         if not rows:
             await interaction.followup.send(
-                f"ERROR : No tracks found! , Check your database connection."
+                "ERROR : No tracks found! , Check your database connection."
             )
             return
         
@@ -467,4 +467,4 @@ class MediaCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(MediaCog(bot))
+    await bot.add_cog(MediaCog(bot), guild=bot._guild)
