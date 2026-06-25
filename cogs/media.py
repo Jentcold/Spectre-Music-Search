@@ -393,6 +393,29 @@ class MediaCog(commands.Cog):
 
         view = SearchPagination(keyword=keyword, all_results=cleaned_results)
         await interaction.followup.send(embed=view.get_current_page_embed(), view=view)
+    
+    @app_commands.command(name="latest", description="Shows the latest mashup")
+    async def latest_command(self, interaction:discord.interactions):
+        await interaction.response.defer()
+        
+        async with self.bot.db_pool.acquire() as conn:
+            sql_query = """
+                            SELECT asset_type, url, title, uploader, date_shared, original_message_url
+                            FROM tracked_media
+                            ORDER BY date_shared DESC
+                            LIMIT 30;
+                        """ 
+            rows = await conn.fetch(sql_query)
+
+        if not rows:
+            await interaction.followup.send(
+                f"ERROR : No tracks found! , Check your database connection."
+            )
+            return
+        
+        cleaned_results = [dict(row) for row in rows]
+        view = SearchPagination(keyword="latest", all_results=cleaned_results)
+        await interaction.followup.send(embed=view.get_current_page_embed(), view=view)
 
 
 async def setup(bot: commands.Bot):
