@@ -11,11 +11,10 @@ CREATE TABLE IF NOT EXISTS tracked_media (
     date_shared DATE NOT NULL,
     original_message_url TEXT NOT NULL,
     channel_id BIGINT NOT NULL,
+    message_content TEXT NOT NULL DEFAULT '',
     UNIQUE (original_message_url, url)
 );
 
--- 3. Composite GIN index on lower(title) for both fuzzy similarity AND substring (ILIKE) matching
 CREATE INDEX IF NOT EXISTS idx_title_trgm ON tracked_media USING gin (lower(title) gin_trgm_ops);
-
--- 4. GIN index on lower(uploader) to keep user searches optimized under the fallback system
 CREATE INDEX IF NOT EXISTS idx_uploader_trgm ON tracked_media USING gin (lower(uploader) gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_content_trgm ON tracked_media USING gin (lower(message_content) gin_trgm_ops);

@@ -4,7 +4,7 @@ import re
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from checks import is_owner
 from config import TARGET_CHANNEL_IDS
@@ -178,6 +178,16 @@ class MediaCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._sync_running = False
+        self.background_sync.add_exception_type(Exception)
+        self.background_sync.start()
+
+    async def cog_unload(self):
+        self.background_sync.cancel()
+
+    async def _count_indexed_for_message(self, conn, jump_url: str) -> int:
+        return await conn.fetchval(
+            "SELECT COUNT(*) FROM tracked_media WHERE original_message_url = $1;", jump_url
+        )
 
     @staticmethod
     def _extract_assets(message: discord.Message) -> list:
@@ -225,6 +235,68 @@ class MediaCog(commands.Cog):
 
         return synced_count, total_scanned
 
+    async def run_incremental_sync(self) -> tuple[int, int]:
+        synced_count = 0
+        total_scanned = 0
+
+        for channel_id in TARGET_CHANNEL_IDS:
+            target_channel = self.bot.get_channel(channel_id)
+            if not target_channel:
+                continue
+
+            print(f"[BgSync] Checking for new entries in: #{target_channel.name}")
+
+            async for message in target_channel.history(limit=None, oldest_first=False):
+                total_scanned += 1
+                if total_scanned % 100 == 0:
+                    print(
+                        f"[BgSync] Evaluated {total_scanned} messages... Inserted {synced_count} entries."
+                    )
+
+                if message.author.bot:
+                    continue
+
+                async with self.bot.db_pool.acquire() as conn:
+                    already = await self._count_indexed_for_message(conn, message.jump_url)
+
+                candidate_assets = self._extract_assets(message)
+
+                if already >= len(candidate_assets) > 0:
+                    continue
+
+                was_logged_count = await self.process_and_save_message(message, candidate_assets)
+                synced_count += was_logged_count
+                await asyncio.sleep(0.1)
+
+        return synced_count, total_scanned
+
+    @tasks.loop(hours=1)
+    async def background_sync(self):
+        if self._sync_running:
+            print("[BgSync] Previous sync still in progress; skipping this tick.")
+            return
+        if not self.bot.is_ready() or self.bot.db_pool is None:
+            print("[BgSync] Bot not ready / DB pool unavailable; skipping this tick.")
+            return
+        if not TARGET_CHANNEL_IDS:
+            return
+
+        self._sync_running = True
+        try:
+            print("[BgSync] Hourly incremental sync starting...")
+            synced_count, total_scanned = await self.run_incremental_sync()
+            print(
+                f"[BgSync] Complete. Scanned {total_scanned} messages, inserted {synced_count} new entries."
+            )
+        except Exception as e:
+            print(f"[BgSync] Error during background sync: {e}")
+        finally:
+            self._sync_running = False
+
+    @background_sync.before_loop
+    async def _wait_for_ready(self):
+        await self.bot.wait_until_ready()
+
     async def process_and_save_message(
         self, message: discord.Message, assets_to_log: list | None = None
     ) -> int:
@@ -270,8 +342,8 @@ class MediaCog(commands.Cog):
                 try:
                     await conn.execute(
                         """
-                        INSERT INTO tracked_media (asset_type, url, title, uploader, date_shared, original_message_url, channel_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        INSERT INTO tracked_media (asset_type, url, title, uploader, date_shared, original_message_url, channel_id, message_content)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         ON CONFLICT (original_message_url, url) DO NOTHING;
                         """,
                         label,
@@ -281,6 +353,7 @@ class MediaCog(commands.Cog):
                         date_obj,
                         message.jump_url,
                         message.channel.id,
+                        message.content or "",
                     )
                     items_saved += 1
                 except Exception as e:
@@ -344,11 +417,16 @@ class MediaCog(commands.Cog):
             sql_query = """
                 SELECT asset_type, url, title, uploader, date_shared, original_message_url
                 FROM tracked_media
-                WHERE (lower(title) % lower($1) OR lower(uploader) % lower($1))
+                WHERE (lower(title) % lower($1) OR lower(uploader) % lower($1) OR lower(message_content) % lower($1))
                    OR (lower(title) LIKE '%' || lower($1) || '%')
                    OR (lower(uploader) LIKE '%' || lower($1) || '%')
+                   OR (lower(message_content) LIKE '%' || lower($1) || '%')
                 ORDER BY
-                    GREATEST(similarity(lower(title), lower($1)), similarity(lower(uploader), lower($1))) DESC
+                    GREATEST(
+                        similarity(lower(title), lower($1)),
+                        similarity(lower(uploader), lower($1)),
+                        similarity(lower(message_content), lower($1))
+                    ) DESC
                 LIMIT 30;
             """
             rows = await conn.fetch(sql_query, keyword)
