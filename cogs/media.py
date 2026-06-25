@@ -499,6 +499,32 @@ class MediaCog(commands.Cog):
         view = SearchPagination(keyword="latest", all_results=cleaned_results)
         await interaction.followup.send(embed=view.get_current_page_embed(), view=view)
 
+    @app_commands.command(name="ping", description="Check the bot's current latency")
+    async def ping_command(self, interaction: discord.Interaction):
+        latency_ms = round(self.bot.latency * 1000)
+        await interaction.response.send_message(
+            f"🏓 Pong! Latency is **{latency_ms}ms**.", ephemeral=True
+        )
+
+    @app_commands.command(name="help", description="Show available bot commands")
+    async def help_command(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="Music Ledger Bot Commands",
+            description="Index and search shared music across channels.",
+            color=discord.Color.blurple(),
+        )
+        commands_info = [
+            ("/sync", "Wipe and re-index all historical messages (owner only)."),
+            ("/reload", "Reload the media cog without restarting (owner only)."),
+            ("/search <keyword>", "Search indexed media by title, uploader, or content."),
+            ("/latest", "Show the most recently shared indexed entries."),
+            ("/ping", "Check the bot's current latency."),
+            ("/help", "Show this help message."),
+        ]
+        for name, value in commands_info:
+            embed.add_field(name=name, value=value, inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(MediaCog(bot), guild=bot._guild)
