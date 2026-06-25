@@ -63,12 +63,12 @@ async def on_ready():
         f"[Initialization] Successfully targeted {len(TARGET_CHANNEL_IDS)} source channels: {TARGET_CHANNEL_IDS}"
     )
     await bot._init_database()
-    await bot.load_extension("cogs.media")
 
     bot.tree.clear_commands(guild=None)
     await bot.tree.sync()
     print("[Initialization] Cleared all global commands.")
 
+    await bot.load_extension("cogs.media")
     await bot.tree.sync(guild=bot._guild)
     print(f"[Initialization] Commands synced to guild {GUILD_ID}.")
 
