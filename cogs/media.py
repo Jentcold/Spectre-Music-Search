@@ -204,15 +204,31 @@ class MediaCog(commands.Cog):
                 assets.append(("FILE", attachment.url, fname))
         return assets
 
+    async def _iter_target_channels(self):
+        """Yield every messageable to scan (text channels, forum threads, etc.)."""
+        for channel_id in TARGET_CHANNEL_IDS:
+            target_channel = self.bot.get_channel(channel_id)
+            if not target_channel:
+                print(f"[Sync] Channel {channel_id} not found; skipping.")
+                continue
+
+            if isinstance(target_channel, discord.ForumChannel):
+                print(f"[Sync] Expanding forum channel: #{target_channel.name}")
+                for thread in target_channel.threads:
+                    yield thread
+                try:
+                    async for thread in target_channel.archived_threads(limit=None):
+                        yield thread
+                except Exception as e:
+                    print(f"[Sync] Failed fetching archived threads for #{target_channel.name}: {e}")
+            else:
+                yield target_channel
+
     async def run_full_sync(self) -> tuple[int, int]:
         synced_count = 0
         total_scanned = 0
 
-        for channel_id in TARGET_CHANNEL_IDS:
-            target_channel = self.bot.get_channel(channel_id)
-            if not target_channel:
-                continue
-
+        async for target_channel in self._iter_target_channels():
             print(f"[Sync] Pulling all entries from: #{target_channel.name}")
 
             async for message in target_channel.history(limit=None, oldest_first=False):
@@ -240,11 +256,7 @@ class MediaCog(commands.Cog):
         synced_count = 0
         total_scanned = 0
 
-        for channel_id in TARGET_CHANNEL_IDS:
-            target_channel = self.bot.get_channel(channel_id)
-            if not target_channel:
-                continue
-
+        async for target_channel in self._iter_target_channels():
             print(f"[BgSync] Checking for new entries in: #{target_channel.name}")
 
             async for message in target_channel.history(limit=None, oldest_first=False):
