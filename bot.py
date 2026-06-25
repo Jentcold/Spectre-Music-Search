@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from checks import is_owner
-from config import DATABASE_URL, TARGET_CHANNEL_IDS, TOKEN
+from config import DATABASE_URL, GUILD_ID, TARGET_CHANNEL_IDS, TOKEN
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -17,6 +17,7 @@ class MusicLedgerBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.db_pool = None
         self._initialized = False
+        self._guild = discord.Object(id=GUILD_ID) if GUILD_ID else None
 
     async def setup_hook(self):
         pass
@@ -63,8 +64,13 @@ async def on_ready():
     )
     await bot._init_database()
     await bot.load_extension("cogs.media")
+
+    bot.tree.clear_commands(guild=None)
     await bot.tree.sync()
-    print("[Initialization] Commands synced.")
+    print("[Initialization] Cleared all global commands.")
+
+    await bot.tree.sync(guild=bot._guild)
+    print(f"[Initialization] Commands synced to guild {GUILD_ID}.")
 
 
 @bot.tree.command(
@@ -75,7 +81,7 @@ async def reload_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     try:
         await bot.reload_extension("cogs.media")
-        await bot.tree.sync()
+        await bot.tree.sync(guild=bot._guild)
         await interaction.followup.send("✅ Reloaded the `cogs.media` cog.")
     except Exception as e:
         await interaction.followup.send(f"❌ Failed to reload cog: `{e}`")
