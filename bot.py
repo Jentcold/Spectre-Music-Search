@@ -41,12 +41,12 @@ class MusicLedgerBot(commands.Bot):
         for cmd in self.tree.get_commands():
             log.info("setup_hook: Global command registered: %s", cmd.name)
         if self._guild:
-            guild_tree = self.tree._guild_commands.get(self._guild.id)
-            if guild_tree:
-                for cmd in guild_tree.get_commands():
-                    log.info("setup_hook: Guild command registered: %s", cmd.name)
-            else:
-                log.warning("setup_hook: No guild tree found for guild %s", self._guild.id)
+            guild_cmds = self.tree.get_commands(guild=self._guild)
+            log.info(
+                "setup_hook: Guild commands registered for %s: %s",
+                self._guild.id,
+                [c.name for c in guild_cmds] or "(none)",
+            )
 
         synced = await self.tree.sync(guild=self._guild)
         log.info(
@@ -98,14 +98,12 @@ async def on_ready():
     log.info("on_ready: Global commands in tree: %s", [c.name for c in all_global])
 
     if bot._guild:
-        guild_tree = bot.tree._guild_commands.get(bot._guild.id)
-        if guild_tree:
-            log.info(
-                "on_ready: Guild commands in tree: %s",
-                [c.name for c in guild_tree.get_commands()],
-            )
-        else:
-            log.warning("on_ready: No guild subtree found for %s", bot._guild.id)
+        guild_cmds = bot.tree.get_commands(guild=bot._guild)
+        log.info(
+            "on_ready: Guild commands in tree for %s: %s",
+            bot._guild.id,
+            [c.name for c in guild_cmds] or "(none)",
+        )
 
     if bot._initialized:
         log.info("on_ready: Already initialized, skipping.")
@@ -117,4 +115,4 @@ async def on_ready():
 
 if __name__ == "__main__":
     log.info("Starting bot...")
-    bot.run(TOKEN, log_level=logging.DEBUG)
+    bot.run(TOKEN, log_handler=None, log_level=logging.DEBUG)
