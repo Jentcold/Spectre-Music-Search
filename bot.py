@@ -16,11 +16,10 @@ class MusicLedgerBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
         self.db_pool = None
-        self._db_ready = False
+        self._initialized = False
 
     async def setup_hook(self):
-        await self.load_extension("cogs.media")
-        await self.tree.sync()
+        pass
 
     async def _init_database(self):
         print("[Database] Connecting to PostgreSQL database pool...")
@@ -38,7 +37,7 @@ class MusicLedgerBot(commands.Bot):
                         "CREATE INDEX IF NOT EXISTS idx_content_trgm ON tracked_media USING gin (lower(message_content) gin_trgm_ops);"
                     )
                     print("[Database] Schema initialized.")
-                self._db_ready = True
+                self._initialized = True
                 break
             except (ConnectionRefusedError, asyncpg.exceptions.CannotConnectNowError):
                 print(
@@ -56,12 +55,16 @@ bot = MusicLedgerBot()
 
 @bot.event
 async def on_ready():
+    if bot._initialized:
+        return
     print(f"Logged in as {bot.user}.")
     print(
         f"[Initialization] Successfully targeted {len(TARGET_CHANNEL_IDS)} source channels: {TARGET_CHANNEL_IDS}"
     )
-    if not bot._db_ready:
-        await bot._init_database()
+    await bot._init_database()
+    await bot.load_extension("cogs.media")
+    await bot.tree.sync()
+    print("[Initialization] Commands synced.")
 
 
 @bot.tree.command(
