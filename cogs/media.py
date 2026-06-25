@@ -229,7 +229,8 @@ class MediaCog(commands.Cog):
                 if not candidate_assets:
                     continue
 
-                was_logged_count = await self.process_and_save_message(message, candidate_assets)
+                async with self.bot.db_pool.acquire() as conn:
+                    was_logged_count = await self.process_and_save_message(conn, message, candidate_assets)
                 synced_count += was_logged_count
                 await asyncio.sleep(0.1)
 
@@ -259,12 +260,12 @@ class MediaCog(commands.Cog):
                 async with self.bot.db_pool.acquire() as conn:
                     already = await self._count_indexed_for_message(conn, message.jump_url)
 
-                candidate_assets = self._extract_assets(message)
+                    candidate_assets = self._extract_assets(message)
 
-                if already >= len(candidate_assets) > 0:
-                    continue
+                    if already >= len(candidate_assets) > 0:
+                        continue
 
-                was_logged_count = await self.process_and_save_message(message, candidate_assets)
+                    was_logged_count = await self.process_and_save_message(conn, message, candidate_assets)
                 synced_count += was_logged_count
                 await asyncio.sleep(0.1)
 
@@ -298,7 +299,7 @@ class MediaCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def process_and_save_message(
-        self, message: discord.Message, assets_to_log: list | None = None
+        self, conn, message: discord.Message, assets_to_log: list | None = None
     ) -> int:
         from stream_meta import fetch_stream_title
         from youtube_meta import fetch_youtube_title
@@ -338,26 +339,25 @@ class MediaCog(commands.Cog):
             elif label == "FILE":
                 title = clean_filename(asset[2], message.author.display_name)
 
-            async with self.bot.db_pool.acquire() as conn:
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO tracked_media (asset_type, url, title, uploader, date_shared, original_message_url, channel_id, message_content)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        ON CONFLICT (original_message_url, url) DO NOTHING;
-                        """,
-                        label,
-                        url,
-                        title,
-                        message.author.display_name,
-                        date_obj,
-                        message.jump_url,
-                        message.channel.id,
-                        message.content or "",
-                    )
-                    items_saved += 1
-                except Exception as e:
-                    print(f"[Database Error] Failed saving track asset: {e}")
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO tracked_media (asset_type, url, title, uploader, date_shared, original_message_url, channel_id, message_content)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (original_message_url, url) DO NOTHING;
+                    """,
+                    label,
+                    url,
+                    title,
+                    message.author.display_name,
+                    date_obj,
+                    message.jump_url,
+                    message.channel.id,
+                    message.content or "",
+                )
+                items_saved += 1
+            except Exception as e:
+                print(f"[Database Error] Failed saving track asset: {e}")
 
         return items_saved
 
