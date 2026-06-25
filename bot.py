@@ -61,12 +61,6 @@ class MusicLedgerBot(commands.Bot):
                 async with self.db_pool.acquire() as conn:
                     with open("schema.sql") as f:
                         await conn.execute(f.read())
-                    await conn.execute(
-                        "ALTER TABLE tracked_media ADD COLUMN IF NOT EXISTS message_content TEXT NOT NULL DEFAULT '';"
-                    )
-                    await conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_content_trgm ON tracked_media USING gin (lower(message_content) gin_trgm_ops);"
-                    )
                     log.info("[Database] Schema initialized.")
                 self._initialized = True
                 break

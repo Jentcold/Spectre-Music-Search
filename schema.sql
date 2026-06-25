@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS tracked_media (
     UNIQUE (original_message_url, url)
 );
 
+-- Ensure column exists on older tables that pre-date this field
+ALTER TABLE tracked_media ADD COLUMN IF NOT EXISTS message_content TEXT NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS idx_title_trgm ON tracked_media USING gin (lower(title) gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_uploader_trgm ON tracked_media USING gin (lower(uploader) gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_content_trgm ON tracked_media USING gin (lower(message_content) gin_trgm_ops);
