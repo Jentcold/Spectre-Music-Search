@@ -10,7 +10,7 @@ from checks import is_owner
 from config import TARGET_CHANNEL_IDS
 
 STREAM_RE = re.compile(
-    r"(https?://(?:www\.)?untitled\.stream/library/project/[a-zA-Z0-9_]+)", re.IGNORECASE
+    r"(https?://(?:www\.)?untitled\.stream/library/project/[a-zA-Z0-9_-]+)", re.IGNORECASE
 )
 YOUTUBE_RE = re.compile(
     r"(https?://(?:www\.)?(?:youtube\.com/[^\s>)]+|youtu\.be/[^\s>)]+|youtube\.com/shorts/[a-zA-Z0-9_\-]+))",
@@ -204,40 +204,81 @@ class MediaCog(commands.Cog):
                 assets.append(("FILE", attachment.url, fname))
         return assets
 
-    async def run_background_sync(self) -> tuple[int, int]:
-        synced_count = 0
-        total_scanned = 0
-
+    async def _iter_target_channels(self):
+        """Yield every messageable to scan (text channels, forum threads, etc.)."""
         for channel_id in TARGET_CHANNEL_IDS:
             target_channel = self.bot.get_channel(channel_id)
             if not target_channel:
+                print(f"[Sync] Channel {channel_id} not found; skipping.")
                 continue
 
-            print(f"[BgSync] Now pulling historic entries from: #{target_channel.name}")
+            if isinstance(target_channel, discord.ForumChannel):
+                print(f"[Sync] Expanding forum channel: #{target_channel.name}")
+                for thread in target_channel.threads:
+                    yield thread
+                try:
+                    async for thread in target_channel.archived_threads(limit=None):
+                        yield thread
+                except Exception as e:
+                    print(f"[Sync] Failed fetching archived threads for #{target_channel.name}: {e}")
+            else:
+                yield target_channel
+
+    async def run_full_sync(self) -> tuple[int, int]:
+        synced_count = 0
+        total_scanned = 0
+
+        async for target_channel in self._iter_target_channels():
+            print(f"[Sync] Pulling all entries from: #{target_channel.name}")
 
             async for message in target_channel.history(limit=None, oldest_first=False):
                 total_scanned += 1
                 if total_scanned % 100 == 0:
                     print(
-                        f"[BgSync] Evaluated {total_scanned} context frames... Inserted {synced_count} entries."
+                        f"[Sync] Evaluated {total_scanned} messages... Inserted {synced_count} entries."
                     )
 
                 if message.author.bot:
-                    await asyncio.sleep(0.05)
+                    continue
+
+                candidate_assets = self._extract_assets(message)
+                if not candidate_assets:
+                    continue
+
+                async with self.bot.db_pool.acquire() as conn:
+                    was_logged_count = await self.process_and_save_message(conn, message, candidate_assets)
+                synced_count += was_logged_count
+                await asyncio.sleep(0.1)
+
+        return synced_count, total_scanned
+
+    async def run_incremental_sync(self) -> tuple[int, int]:
+        synced_count = 0
+        total_scanned = 0
+
+        async for target_channel in self._iter_target_channels():
+            print(f"[BgSync] Checking for new entries in: #{target_channel.name}")
+
+            async for message in target_channel.history(limit=None, oldest_first=False):
+                total_scanned += 1
+                if total_scanned % 100 == 0:
+                    print(
+                        f"[BgSync] Evaluated {total_scanned} messages... Inserted {synced_count} entries."
+                    )
+
+                if message.author.bot:
                     continue
 
                 async with self.bot.db_pool.acquire() as conn:
                     already = await self._count_indexed_for_message(conn, message.jump_url)
 
-                candidate_assets = self._extract_assets(message)
+                    candidate_assets = self._extract_assets(message)
 
-                if already >= len(candidate_assets) > 0:
-                    await asyncio.sleep(0.05)
-                    continue
+                    if already >= len(candidate_assets) > 0:
+                        continue
 
-                was_logged_count = await self.process_and_save_message(message, candidate_assets)
+                    was_logged_count = await self.process_and_save_message(conn, message, candidate_assets)
                 synced_count += was_logged_count
-
                 await asyncio.sleep(0.1)
 
         return synced_count, total_scanned
@@ -245,7 +286,7 @@ class MediaCog(commands.Cog):
     @tasks.loop(hours=1)
     async def background_sync(self):
         if self._sync_running:
-            print("[BgSync] Previous hourly sync still in progress; skipping this tick.")
+            print("[BgSync] Previous sync still in progress; skipping this tick.")
             return
         if not self.bot.is_ready() or self.bot.db_pool is None:
             print("[BgSync] Bot not ready / DB pool unavailable; skipping this tick.")
@@ -255,10 +296,10 @@ class MediaCog(commands.Cog):
 
         self._sync_running = True
         try:
-            print("[BgSync] Hourly background sync starting...")
-            synced_count, total_scanned = await self.run_background_sync()
+            print("[BgSync] Hourly incremental sync starting...")
+            synced_count, total_scanned = await self.run_incremental_sync()
             print(
-                f"[BgSync] Complete. Scanned {total_scanned} messages, inserted/updated {synced_count} entries."
+                f"[BgSync] Complete. Scanned {total_scanned} messages, inserted {synced_count} new entries."
             )
         except Exception as e:
             print(f"[BgSync] Error during background sync: {e}")
@@ -270,7 +311,7 @@ class MediaCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def process_and_save_message(
-        self, message: discord.Message, assets_to_log: list | None = None
+        self, conn, message: discord.Message, assets_to_log: list | None = None
     ) -> int:
         from stream_meta import fetch_stream_title
         from youtube_meta import fetch_youtube_title
@@ -310,30 +351,30 @@ class MediaCog(commands.Cog):
             elif label == "FILE":
                 title = clean_filename(asset[2], message.author.display_name)
 
-            async with self.bot.db_pool.acquire() as conn:
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO tracked_media (asset_type, url, title, uploader, date_shared, original_message_url, channel_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (original_message_url, url) DO NOTHING;
-                        """,
-                        label,
-                        url,
-                        title,
-                        message.author.display_name,
-                        date_obj,
-                        message.jump_url,
-                        message.channel.id,
-                    )
-                    items_saved += 1
-                except Exception as e:
-                    print(f"[Database Error] Failed saving track asset: {e}")
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO tracked_media (asset_type, url, title, uploader, date_shared, original_message_url, channel_id, message_content)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (original_message_url, url) DO NOTHING;
+                    """,
+                    label,
+                    url,
+                    title,
+                    message.author.display_name,
+                    date_obj,
+                    message.jump_url,
+                    message.channel.id,
+                    message.content or "",
+                )
+                items_saved += 1
+            except Exception as e:
+                print(f"[Database Error] Failed saving track asset: {e}")
 
         return items_saved
 
     @app_commands.command(
-        name="sync", description="Scan ALL historical messages and backfill database ledger values"
+        name="sync", description="Wipe database and re-index all historical messages from source channels"
     )
     @is_owner()
     async def sync_command(self, interaction: discord.Interaction):
@@ -343,16 +384,52 @@ class MediaCog(commands.Cog):
             await interaction.followup.send("Channel setup configuration is missing or invalid.")
             return
 
-        await interaction.followup.send("Commencing Database Sync...")
+        if self._sync_running:
+            await interaction.followup.send("⚠️ A sync operation is already in progress.")
+            return
 
-        synced_count, total_scanned = await self.run_background_sync()
+        self._sync_running = True
+        try:
+            async with self.bot.db_pool.acquire() as conn:
+                await conn.execute("DELETE FROM tracked_media;")
+                print("[Sync] Wiped tracked_media table.")
 
-        await interaction.followup.send(
-            f"✅ Database Sync Complete! Scanned {total_scanned} messages and updated **{synced_count}** entries."
-        )
+            await interaction.followup.send("🧹 Database wiped. Commencing full re-sync...")
+
+            synced_count, total_scanned = await self.run_full_sync()
+
+            await interaction.followup.send(
+                f"✅ Sync complete! Scanned **{total_scanned}** messages and indexed **{synced_count}** entries."
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Sync failed: `{e}`")
+        finally:
+            self._sync_running = False
 
     @sync_command.error
     async def sync_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        if isinstance(error, app_commands.errors.CheckFailure):
+            await interaction.response.send_message(
+                "❌ You are not authorized to use this command.", ephemeral=True
+            )
+
+    @app_commands.command(
+        name="reload", description="Reload the media commands cog without restarting the bot"
+    )
+    @is_owner()
+    async def reload_command(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.bot.reload_extension("cogs.media")
+            await self.bot.tree.sync(guild=self.bot._guild)
+            await interaction.followup.send("✅ Reloaded the `cogs.media` cog.")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Failed to reload cog: `{e}`")
+
+    @reload_command.error
+    async def reload_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ):
         if isinstance(error, app_commands.errors.CheckFailure):
@@ -374,11 +451,16 @@ class MediaCog(commands.Cog):
             sql_query = """
                 SELECT asset_type, url, title, uploader, date_shared, original_message_url
                 FROM tracked_media
-                WHERE (lower(title) % lower($1) OR lower(uploader) % lower($1))
+                WHERE (lower(title) % lower($1) OR lower(uploader) % lower($1) OR lower(message_content) % lower($1))
                    OR (lower(title) LIKE '%' || lower($1) || '%')
                    OR (lower(uploader) LIKE '%' || lower($1) || '%')
+                   OR (lower(message_content) LIKE '%' || lower($1) || '%')
                 ORDER BY
-                    GREATEST(similarity(lower(title), lower($1)), similarity(lower(uploader), lower($1))) DESC
+                    GREATEST(
+                        similarity(lower(title), lower($1)),
+                        similarity(lower(uploader), lower($1)),
+                        similarity(lower(message_content), lower($1))
+                    ) DESC
                 LIMIT 30;
             """
             rows = await conn.fetch(sql_query, keyword)
@@ -395,7 +477,7 @@ class MediaCog(commands.Cog):
         await interaction.followup.send(embed=view.get_current_page_embed(), view=view)
     
     @app_commands.command(name="latest", description="Shows the latest mashup")
-    async def latest_command(self, interaction:discord.interactions):
+    async def latest_command(self, interaction: discord.Interaction):
         await interaction.response.defer()
         
         async with self.bot.db_pool.acquire() as conn:
@@ -409,7 +491,7 @@ class MediaCog(commands.Cog):
 
         if not rows:
             await interaction.followup.send(
-                f"ERROR : No tracks found! , Check your database connection."
+                "ERROR : No tracks found! , Check your database connection."
             )
             return
         
@@ -417,6 +499,32 @@ class MediaCog(commands.Cog):
         view = SearchPagination(keyword="latest", all_results=cleaned_results)
         await interaction.followup.send(embed=view.get_current_page_embed(), view=view)
 
+    @app_commands.command(name="ping", description="Check the bot's current latency")
+    async def ping_command(self, interaction: discord.Interaction):
+        latency_ms = round(self.bot.latency * 1000)
+        await interaction.response.send_message(
+            f"🏓 Pong! Latency is **{latency_ms}ms**.", ephemeral=True
+        )
+
+    @app_commands.command(name="help", description="Show available bot commands")
+    async def help_command(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="Music Ledger Bot Commands",
+            description="Index and search shared music across channels.",
+            color=discord.Color.blurple(),
+        )
+        commands_info = [
+            ("/sync", "Wipe and re-index all historical messages (owner only)."),
+            ("/reload", "Reload the media cog without restarting (owner only)."),
+            ("/search <keyword>", "Search indexed media by title, uploader, or content."),
+            ("/latest", "Show the most recently shared indexed entries."),
+            ("/ping", "Check the bot's current latency."),
+            ("/help", "Show this help message."),
+        ]
+        for name, value in commands_info:
+            embed.add_field(name=name, value=value, inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(MediaCog(bot))
+    await bot.add_cog(MediaCog(bot), guild=bot._guild)

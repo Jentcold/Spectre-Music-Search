@@ -9,8 +9,13 @@ import aiohttp
 
 OEMBED_URL = "https://www.youtube.com/oembed"
 
-# Regex to isolate just the pure clean youtube link
-YT_ID_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([\w\-]+)", re.IGNORECASE)
+# Regex to isolate just the pure clean youtube link.
+# Covers /shorts/, /embed/, /live/, /v/ and youtu.be paths...
+YT_ID_RE = re.compile(
+    r"(?:youtube\.com/(?:shorts/|embed/|live/|v/)|youtu\.be/)([\w-]+)", re.IGNORECASE
+)
+# ...and the ?v= query form (which may sit behind other params, e.g. ?app=desktop&v=ID)
+YT_WATCH_RE = re.compile(r"[?&]v=([\w-]+)", re.IGNORECASE)
 
 
 async def fetch_youtube_title(video_url: str, timeout_seconds: float = 5.0) -> str | None:
@@ -18,7 +23,7 @@ async def fetch_youtube_title(video_url: str, timeout_seconds: float = 5.0) -> s
     Returns the video title, or None if it couldn't be fetched for any reason.
     Cleans URLs to prevent historical tracking flags from breaking the oEmbed request.
     """
-    match = YT_ID_RE.search(video_url)
+    match = YT_ID_RE.search(video_url) or YT_WATCH_RE.search(video_url)
     if not match:
         return None
 
